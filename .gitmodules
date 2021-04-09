@@ -1,0 +1,3 @@
+[submodule "external/yolo_v5_deepsort"]
+	path = external/yolo_v5_deepsort
+	url = https://github.com/mikel-brostrom/Yolov5_DeepSort_Pytorch.git
