@@ -1,3 +1,6 @@
 [submodule "external/yolo_v5_deepsort"]
 	path = external/yolo_v5_deepsort
 	url = https://github.com/mikel-brostrom/Yolov5_DeepSort_Pytorch.git
+[submodule "external/node_server"]
+	path = external/node_server
+	url = https://github.com/salgu1998/cross_walker_watch_server.git

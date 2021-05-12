@@ -22,6 +22,9 @@ from pathlib import Path
 import cv2
 import yaml
 
+save_path = ""
+is_save_cropped = False
+
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
 
 label_names = []
@@ -51,41 +54,52 @@ def compute_color_for_labels(label):
     return tuple(color)
 
 font_size = None
-def draw_boxes(img, bbox, identities=None, offset=(0, 0), yolo_label=None):
-	for i, box in enumerate(bbox):
-		x1, y1, x2, y2 = [int(i) for i in box]
-		x1 += offset[0]
-		x2 += offset[0]
-		y1 += offset[1]
-		y2 += offset[1]
-		# box text and bar
-		id = int(identities[i]) if identities is not None else 0
-		color = compute_color_for_labels(id)
-		label = '{} {:d}'.format(
-			"" if yolo_label is None else label_names[yolo_label], 
-			id
-		)
-		
-		cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
-		# cv2.rectangle(
-		# 	img, (x1, y1), (x1 + t_size[0] + 3, y1 + t_size[1] + 4), color, -1)
-		
-		if font_size is not None:
-			t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, font_size, 2)[0]
+def draw_boxes(frame, img, bbox, identities=None, offset=(0, 0), yolo_label=None):
+    copy_img = img.copy()
 
-			cv2.rectangle(
-				img, (x1, y1), (x1 + t_size[0]+2, y1 + t_size[1]+2), color, -1)
-				# img, (x1, y1), (x1 + t_size[0] + font_size*1.5, y1 + t_size[1] + font_size*2), color, -1)
-			cv2.putText(img, label, (x1, y1 +
-										t_size[1] + 1), cv2.FONT_HERSHEY_PLAIN, font_size, [255, 255, 255], 1)
-	return img
+    for i, box in enumerate(bbox):
+        x1, y1, x2, y2 = [int(i) for i in box]
+        x1 += offset[0]
+        x2 += offset[0]
+        y1 += offset[1]
+        y2 += offset[1]
+
+        cropped_img = copy_img[y1:y2, x1:x2]
+        # print("shape : ", cropped_img.shape(), " // ", (x1, y1), (x2, y2))
+
+        if(cropped_img.shape[0] == 0 or cropped_img.shape[1] == 0): # wrong coord
+            continue
+
+        # box text and bar
+        id = int(identities[i]) if identities is not None else 0
+        name = "" if yolo_label is None else label_names[yolo_label]
+        color = compute_color_for_labels(id)
+        label = '{} {:d}'.format(name, id)
+
+        if is_save_cropped:
+            cv2.imwrite(save_path+"/images/f"+str(frame)+"_id"+str(id)+"_label_is_"+str(name)+".jpg", cropped_img)
+
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+        
+        if font_size is not None:
+            t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, font_size, 2)[0]
+
+            cv2.rectangle(
+                img, (x1, y1), (x1 + t_size[0]+2, y1 + t_size[1]+2), color, -1)
+                # img, (x1, y1), (x1 + t_size[0] + font_size*1.5, y1 + t_size[1] + font_size*2), color, -1)
+            cv2.putText(img, label, (x1, y1 +
+                                        t_size[1] + 1), cv2.FONT_HERSHEY_PLAIN, font_size, [255, 255, 255], 1)
+    return img
 
 
 def detect(opt, save_img=False):
-    out, source, weights, view_img, save_txt, imgsz = \
-        opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
+    out, source, weights, view_img, save_txt, imgsz, save_cropped = \
+        opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, opt.save_cropped_img
     webcam = source == '0' or source.startswith(
         'rtsp') or source.startswith('http') or source.endswith('.txt')
+
+    global save_path; save_path = out
+    global is_save_cropped; is_save_cropped = save_cropped
 
     # initialize deepsort
     cfg = get_config()
@@ -205,7 +219,7 @@ def detect(opt, save_img=False):
                     if len(outputs) > 0:
                         bbox_xyxy = outputs[:, :4]
                         identities = outputs[:, -1]
-                        draw_boxes(im0, bbox_xyxy, identities, yolo_label=idx)
+                        draw_boxes(frame_idx, im0, bbox_xyxy, identities, yolo_label=idx)
 
                     # Write MOT compliant results to file
                     if save_txt and len(outputs) != 0:
@@ -259,42 +273,46 @@ def detect(opt, save_img=False):
 
 
 if __name__ == '__main__':
-	parser = argparse.ArgumentParser()
-	parser.add_argument('--weights', type=str,
-						default='checkpoint/yolov5s.pt', help='model.pt path')
-	# file/folder, 0 for webcam
-	parser.add_argument('--source', type=str,
-						default='inference/images', help='source')
-	parser.add_argument('--output', type=str, default='inference/output',
-						help='output folder')  # output folder
-	parser.add_argument('--img-size', type=int, default=640,
-						help='inference size (pixels)')
-	parser.add_argument('--conf-thres', type=float,
-						default=0.4, help='object confidence threshold')
-	parser.add_argument('--iou-thres', type=float,
-						default=0.5, help='IOU threshold for NMS')
-	parser.add_argument('--fourcc', type=str, default='mp4v',
-						help='output video codec (verify ffmpeg support)')
-	parser.add_argument('--device', default='',
-						help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-	parser.add_argument('--view-img', action='store_true',
-						help='display results')
-	parser.add_argument('--save-txt', action='store_true',
-						help='save results to *.txt')
-	parser.add_argument('--classes', nargs='+', type=int,
-						default=default_classes, help='filter by class')
-	parser.add_argument('--agnostic-nms', action='store_true',
-						help='class-agnostic NMS')
-	parser.add_argument('--augment', action='store_true',
-						help='augmented inference')
-	parser.add_argument("--config_deepsort", type=str,
-						default="configs/deep_sort.yaml")
-	parser.add_argument("--font-size", type=int, default=None)
-	args = parser.parse_args()
-	args.img_size = check_img_size(args.img_size)
-	print(args)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--weights', type=str,
+                        default='checkpoint/yolov5s.pt', help='model.pt path')
+    # file/folder, 0 for webcam
+    parser.add_argument('--source', type=str,
+                        default='inference/images', help='source')
+    parser.add_argument('--output', type=str, default='inference/output',
+                        help='output folder')  # output folder
+    parser.add_argument('--img-size', type=int, default=640,
+                        help='inference size (pixels)')
+    parser.add_argument('--conf-thres', type=float,
+                        default=0.4, help='object confidence threshold')
+    parser.add_argument('--iou-thres', type=float,
+                        default=0.5, help='IOU threshold for NMS')
+    parser.add_argument('--fourcc', type=str, default='mp4v',
+                        help='output video codec (verify ffmpeg support)')
+    parser.add_argument('--device', default='',
+                        help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--view-img', action='store_true',
+                        help='display results')
+    parser.add_argument('--save-txt', action='store_true',
+                        help='save results to *.txt')
+    parser.add_argument('--classes', nargs='+', type=int,
+                        default=default_classes, help='filter by class')
+    parser.add_argument('--agnostic-nms', action='store_true',
+                        help='class-agnostic NMS')
+    parser.add_argument('--augment', action='store_true',
+                        help='augmented inference')
+    parser.add_argument("--config_deepsort", type=str,
+                        default="configs/deep_sort.yaml")
+    parser.add_argument("--font-size", type=int,
+                        default=None)
+    parser.add_argument("--save-cropped-img", action='store_true',
+                        help="save detected object's cropped images")
 
-	font_size = args.font_size
+    args = parser.parse_args()
+    args.img_size = check_img_size(args.img_size)
+    print(args)
 
-	with torch.no_grad():
-		detect(args)
+    font_size = args.font_size
+
+    with torch.no_grad():
+        detect(args)
