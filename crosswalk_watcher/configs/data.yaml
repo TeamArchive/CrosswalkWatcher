@@ -1,0 +1,9 @@
+names:
+- person
+- bike
+- bus
+- car
+- tractor
+nc: 5
+train: ../train_dataset/cctv/4/train.txt
+val: ../train_dataset/cctv/4/val.txt
