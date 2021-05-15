@@ -4,3 +4,6 @@
 [submodule "external/node_server"]
 	path = external/node_server
 	url = https://github.com/salgu1998/cross_walker_watch_server.git
+[submodule "external/app"]
+	path = external/app
+	url = https://github.com/ARCHIVE-code21/CWWF.git
