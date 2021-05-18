@@ -78,27 +78,6 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
 
     return model_ft, input_size
 
-# data_dir = "./data/hymenoptera_data"
-
-# # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception]
-# model_name = "inception"
-
-# # Number of classes in the dataset
-# num_classes = 2
-
-# # Batch size for training (change depending on how much memory you have)
-# batch_size = 8
-
-# # Number of epochs to train for
-# num_epochs = 15
-
-# # Flag for feature extracting. When False, we finetune the whole model,
-# #   when True we only update the reshaped layer params
-# feature_extract = True
-
-# model_ft, input_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=False)
-# print(model_ft)
-
 # Initialize the model for this run
 # > model_ft, input_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
 
