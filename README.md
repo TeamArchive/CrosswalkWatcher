@@ -2,19 +2,25 @@
 
 ## Initialize Project
 
-> ### Initialize Submodule
-> <pre>
+### Initialize Submodule
+<pre>
 > git submodule update --init --recursive
-> </pre>
+</pre>
 
-> ### Create Python Vertual Enviroment
-> <pre>
+### Create Python Vertual Enviroment
+<pre>
 > python3 -m venv .env
 > source .env/bin/activate
-> </pre>
+</pre>
 
-> ### Install Yolo v5 requirements
-> <pre>
-> cd external/yolo_v5_deepsort
+### Install Yolo v5 requirements
+<pre>
+> cd (project)/external/yolo_v5_deepsort
 > pip install -r requirements.txt
-> </pre>
+</pre>
+
+### Detection
+<pre>
+> cd (project)/crosswalk_watcher
+> python detect.py .. (options)
+</pre>

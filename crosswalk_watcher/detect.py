@@ -12,15 +12,20 @@ from deep_sort_pytorch.deep_sort import DeepSort
 import torch
 import torch.backends.cudnn as cudnn
 
+import numpy as np
+from pathlib import Path
+import cv2
+import yaml
+
 import argparse
 import os
 import platform
 import shutil
 import time
 
-from pathlib import Path
-import cv2
-import yaml
+
+SERVER_URL 		 = "http://localhost:3000/"
+ABNORMAL_EPSILON = 0.7
 
 img_save_path = ""
 is_save_cropped = False
@@ -29,6 +34,15 @@ palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
 
 label_names = []
 default_classes = []
+
+def upload_data(cctv_num, cctv_location, cctv_state, cctv_url):
+	command = (
+		'curl -L -v -d ' +
+		'\'{{ "cctv_number":"{0}","cctv_location":"{1}","cctv_state":"{2}","cctv_url":"{3}" }}\''+
+		' -H "Accept: application/json" -H "Content-Type: application/json" -X POST {4}'
+	).format(cctv_num, cctv_location, cctv_state, cctv_url, SERVER_URL)
+
+	os.system(command)
 
 def bbox_rel(*xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
@@ -71,8 +85,6 @@ def draw_boxes(frame, img, bbox, wh, identities=None, offset=(0, 0), yolo_label=
         color = compute_color_for_labels(id)
         label = '{} {:d}'.format(name, id)
 
-        cropped_img = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2GRAY)
-
         if is_save_cropped:
             cv2.imwrite(
                 img_save_path+"/images/f"+str(frame)+"_id"+str(id)+"_label_is_"+str(name)+".jpg", 
@@ -94,10 +106,7 @@ def draw_boxes(frame, img, bbox, wh, identities=None, offset=(0, 0), yolo_label=
             cv2.putText(
                 img, label, (x1, y1 + t_size[1] + 1), cv2.FONT_HERSHEY_PLAIN, font_size, [255, 255, 255], 1)
 
-    test = torch.stack(stacked_img, dim=0)
-    print(test.shape)
-    return img, test
-
+    return img, stacked_img
 
 def detect(opt, save_img=False):
     global label_names
@@ -170,7 +179,7 @@ def detect(opt, save_img=False):
         dataset = LoadStreams(source, img_size=imgsz)
     else:
         # view_img = True
-        save_img = True
+        # save_img = True
         dataset = LoadImages(source, img_size=imgsz)
 
     # Get names and colors
@@ -205,7 +214,10 @@ def detect(opt, save_img=False):
         t2 = time_synchronized()
 
         # Process detections
+        labels = []
+        crop_imgs = []
         for i, det in enumerate(pred):  # detections per image
+
             if webcam:  # batch_size >= 1
                 p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
             else:
@@ -229,6 +241,7 @@ def detect(opt, save_img=False):
                     det_by_label[int(it[-1].item())].append(it)
 
                 for idx, elem in enumerate(det_by_label):
+
                     if len(elem) == 0: 
                         continue
 
@@ -236,6 +249,7 @@ def detect(opt, save_img=False):
 
                     bbox_xywh = []
                     confs = []
+                    sliced_img = None
 
                     # Adapt detections to deep sort input format
                     for *xyxy, conf, cls in cur_det:
@@ -254,8 +268,10 @@ def detect(opt, save_img=False):
                     if len(outputs) > 0:
                         bbox_xyxy = outputs[:, :4]
                         identities = outputs[:, -1]
-                        _, pre_img = draw_boxes(
+                        _, img_elems = draw_boxes(
                             frame_idx, im0, bbox_xyxy, (vid_w, vid_h), identities, yolo_label=idx)
+                        
+                        crop_imgs.extend(img_elems)
 
                     # Write MOT compliant results to file
                     if save_txt and len(outputs) != 0:
@@ -268,6 +284,20 @@ def detect(opt, save_img=False):
                             with open(txt_path, 'a') as f:
                                 f.write(('%g ' * 10 + '\n') % (frame_idx, identity, bbox_left,
                                                             bbox_top, bbox_w, bbox_h, idx, -1, -1, -1))  # label format
+
+                    outputs = [ np.concatenate((x, (idx, -1)), axis=None) for x in outputs]
+                    labels.extend(outputs)
+
+                if crop_imgs:
+                    crop_imgs = torch.stack(crop_imgs, dim=0)
+
+                    # TODO : abnormal detection (image input : crop_img, label input : labels)
+                    result = None 
+
+                    # abnormal situation detected
+                    if result <= ABNORMAL_EPSILON:
+                        # TODO : put cctv infomation in upload_data arguments 
+                        pass
 
             else:
                 deepsort[idx].increment_ages()
@@ -283,11 +313,9 @@ def detect(opt, save_img=False):
 
             # Save results (image with detections)
             if save_img:
-                print('saving img!')
                 if dataset.mode == 'images':
                     cv2.imwrite(save_path, im0)
                 else:
-                    print('saving video!')
                     if vid_path != save_path:  # new video
                         vid_path = save_path
                         if isinstance(vid_writer, cv2.VideoWriter):
