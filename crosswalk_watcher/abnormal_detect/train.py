@@ -29,8 +29,6 @@ PRINT_PER 	= 100
 MAX_GRAD_NORM = 5
 LEARNING_RATE = 0.01
 
-
-
 def train(
 	model, train_data, val_data, mini_batch, 
 	criterion_func, optim, clip=5

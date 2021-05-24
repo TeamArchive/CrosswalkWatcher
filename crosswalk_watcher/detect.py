@@ -23,7 +23,6 @@ import platform
 import shutil
 import time
 
-
 SERVER_URL 		 = "http://localhost:3000/"
 ABNORMAL_EPSILON = 0.7
 
