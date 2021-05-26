@@ -83,17 +83,22 @@ class AbnormalDetector(nn.Module):
 			dropout=drop_prob,
 			num_layers=n_layer,
 			# bidirectional=True,
-			batch_first=True,
+			# batch_first=True,
 		)
 
 		# < Output : FC Layer for Labelling >
 		self.out_fc = nn.Sequential(
-			nn.Linear(lstm_hidden_size, 128), 		nn.ReLU(), self.dropout,
+			nn.Linear(lstm_hidden_size, 128), nn.ReLU(), self.dropout,
 			nn.Sequential(nn.Linear(128, 64)), nn.ReLU(), self.dropout,
 			nn.Linear(64, output_size)
 		)
 
-	def forward(self, images, labels, hidden_and_cell):
+		# < Activation function >
+		self.sigmoid = nn.Sigmoid()
+
+	def forward(self, x, hidden):
+
+		images = x[0]; labels = x[1]
 		
 		# < Image inputs >
 		image_result = self.image_net(images)
@@ -106,15 +111,17 @@ class AbnormalDetector(nn.Module):
 		stacked_result = torch.unsqueeze(stacked_result, 0)
 
 		# < LSTM layer >
-		lstm_result, hidden_and_cell = self.lstm(stacked_result, hidden_and_cell)
+		lstm_result, hidden = self.lstm(stacked_result, hidden)
 		lstm_result = self.dropout(lstm_result)
+		lstm_result = lstm_result.squeeze()
 
-		print("lstm_size is ", lstm_result.shape)
-
-		# # < FC Layer >
+		# < FC Layer >
 		fc_result = self.out_fc(lstm_result)
 
-		return fc_result, hidden_and_cell
+		# < Activation >
+		result = self.sigmoid(fc_result)
+		
+		return result, hidden
 
 	def init_hidden(self, batch_size):
 		weight = next(self.parameters()).data
@@ -124,50 +131,3 @@ class AbnormalDetector(nn.Module):
 		)
 		
 		return hidden
-
-'''
----------------------------------------------------------------------------
- For Test
----------------------------------------------------------------------------
-'''
-
-is_cuda = torch.cuda.is_available()
-
-if is_cuda:
-    device = torch.device("cuda")
-else:
-    device = torch.device("cpu")
-
-lstm_hidden_size = 128
-model = AbnormalDetector(device, 8, 1, lstm_hidden_size, 5, 4, max_obj_size=128)
-
-hidden = model.init_hidden(1)
-model.zero_grad()
-
-n_object = 4
-image_input_tensor = []
-label_input_tensor = []
-
-for n in range(n_object):
-	image_input_tensor.append(
-		torch.rand(3, model.image_input_size, model.image_input_size))
-	label_input_tensor.append(
-		torch.rand(8))
-
-image_input_tensor = torch.stack(image_input_tensor, dim=0)
-label_input_tensor = torch.stack(label_input_tensor, dim=0)
-
-print("image_shape : ", image_input_tensor.shape)
-print("label_shape : ", label_input_tensor.shape)
-
-# model.eval()
-out, h  = model(image_input_tensor, label_input_tensor, hidden)
-print(" 1 step - ", out.shape, " : ", out)
-out, h  = model(image_input_tensor, label_input_tensor, h)
-print(" 2 step - ", out.shape, " : ", out)
-out, h  = model(image_input_tensor, label_input_tensor, h)
-print(" 3 step - ", out.shape, " : ", out)
-
-'''
----------------------------------------------------------------------------
-'''

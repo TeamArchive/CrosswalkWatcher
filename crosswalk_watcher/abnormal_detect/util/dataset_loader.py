@@ -130,5 +130,3 @@ def dataset_folder_open(folder_name):
 			image_list[i] = torch.stack(sorted_img, dim=0)
 
 		return image_list, label_list
-
-# image_list, label_list = dataset_folder_open("../../../../../project/train_dataset/tracked/")
