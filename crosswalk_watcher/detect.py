@@ -155,7 +155,14 @@ def detect(opt, save_img=False):
         )
 
     # Initialize
-    device = select_device(opt.device)
+    device = None
+    is_cuda = torch.cuda.is_available()
+
+    if is_cuda:
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+
     if os.path.exists(out):
         shutil.rmtree(out)  # delete output folder
     os.makedirs(out)  # make new output folder

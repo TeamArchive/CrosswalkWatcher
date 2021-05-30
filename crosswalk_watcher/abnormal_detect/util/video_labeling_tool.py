@@ -25,13 +25,15 @@ LABEL_FONT_THICK = 3
 
 YOLO_NAME = ['person', 'bike', 'bus', 'car']
 
-video_f = "../../../../../project/train_dataset/videos/a22.mp4"
-label_f = "../../../../../project/train_dataset/tracked/a22/results.txt"
-project_path = "../../../../../project/train_dataset/tracked"
 video_name = "a22"
+project_path = "../../../../../project/train_dataset/videos/"
+
+video_f = project_path+video_name+"/"+video_name+".mp4"
+label_f = project_path+video_name+"/results.txt"
+project_path = "../../../../../project/train_dataset/tracked"
 
 # < Init Folder >
-save_path = project_path+"/"+video_name+"/output"
+save_path = project_path+video_name+"/output"
 
 if os.path.exists(save_path):
 	shutil.rmtree(save_path)  # delete output folder
@@ -173,12 +175,10 @@ while True:
 
 	# < Key Process >
 	elif key == 93 or key == 3: # right
-		print("right")
 		idx+=1
+		cv2.setTrackbarPos("Frame", WINDOW_NAME, idx)
 	elif key == 91 or key == 2: # left
-		print("left")
 		idx-=(1 if idx>0 else 0)
-
-	cv2.setTrackbarPos("Frame", WINDOW_NAME, idx)
+		cv2.setTrackbarPos("Frame", WINDOW_NAME, idx)
 
 cv2.destroyAllWindows()

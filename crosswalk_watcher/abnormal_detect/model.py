@@ -107,7 +107,12 @@ class AbnormalDetector(nn.Module):
 		label_result = self.in_fc(labels)
 
 		# < Concatenate >
-		stacked_result = torch.cat([image_result.logits, label_result], dim=1)
+		
+		if self.training:
+			stacked_result = torch.cat([image_result.logits, label_result], dim=1)
+		else:
+			stacked_result = torch.cat([image_result, label_result], dim=1)
+
 		stacked_result = torch.unsqueeze(stacked_result, 0)
 
 		# < LSTM layer >

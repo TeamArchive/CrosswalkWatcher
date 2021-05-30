@@ -30,6 +30,7 @@ def dataset_folder_open(folder_name):
 
 	path = folder_name
 	dataset_list = os.listdir(path)
+	dataset = []
 
 	for data in dataset_list:
 		if IGNORE_FOLDER.match(data):
@@ -129,4 +130,7 @@ def dataset_folder_open(folder_name):
 
 			image_list[i] = torch.stack(sorted_img, dim=0)
 
-		return image_list, label_list
+		dataset.append( (image_list, label_list, largest_batch) )
+
+	return dataset
+
