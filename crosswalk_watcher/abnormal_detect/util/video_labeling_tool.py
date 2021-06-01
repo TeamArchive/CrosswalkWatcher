@@ -23,14 +23,15 @@ INFO_FONT_SIZE = 2
 LABEL_FONT_SIZE = 2
 LABEL_FONT_THICK = 3
 
-YOLO_NAME = ['person', 'bike', 'bus', 'car']
+YOLO_NAME = ['person', 'bike', 'bus', 'car', 'other']
 
-video_name = "a22"
+video_name = "a1"
 project_path = "../../../../../project/train_dataset/videos/"
 
-video_f = project_path+video_name+"/"+video_name+".mp4"
+video_f = project_path+video_name+".mp4"
+
+project_path = "../../../../../project/train_dataset/tracked_test/"
 label_f = project_path+video_name+"/results.txt"
-project_path = "../../../../../project/train_dataset/tracked"
 
 # < Init Folder >
 save_path = project_path+video_name+"/output"
@@ -39,7 +40,7 @@ if os.path.exists(save_path):
 	shutil.rmtree(save_path)  # delete output folder
 os.makedirs(save_path)  # make new output folder
 
-imgsz = 640
+imgsz = 1280
 
 dataset = LoadImages(video_f, img_size=imgsz)
 dataset = list(enumerate(dataset))
@@ -85,16 +86,12 @@ def mouse_callback(event, x, y, flags, param):
 				if not is_modify:
 					selected.append({'id': box[1], 'lb': box[6], 'start_frame': idx})
 
-		print(selected)
-
 	if event == cv2.EVENT_RBUTTONDOWN:
 		for box in label[idx]:
 			if (box[2] <= x <= box[4]) and (box[3] <= y <= box[5]):		# Check Mouse in Box
 				for sel in selected:									# Check is Selection exist
 					if sel['id'] is box[1] and sel['lb'] is box[6]:		# Check which is same Box
 						del sel
-
-		print(selected)
 
 cv2.setMouseCallback(WINDOW_NAME, mouse_callback)
 
@@ -128,7 +125,7 @@ while True:
 		cv2.rectangle(img, (box[2], box[3]), (box[4], box[5]), box_color, 2)
 
 		# Label
-		label_txt = '{} {:d}'.format(YOLO_NAME[box[6]], box[1])
+		label_txt = '{} {:d}'.format(YOLO_NAME[box[6]-1], box[1])
 		t_size = cv2.getTextSize(label_txt, cv2.FONT_HERSHEY_PLAIN, LABEL_FONT_SIZE, LABEL_FONT_THICK)[0]
 
 		cv2.rectangle(img, (box[2], box[3]-t_size[1]), (box[2]+t_size[0], box[3]+1), box_color, -1)

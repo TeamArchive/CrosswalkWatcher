@@ -1,22 +1,23 @@
 import os
 from glob import glob
-
 import cv2
-
 import re
 
 import torch
 from torch import tensor
 import numpy as np
 
+from tqdm import tqdm
+
 from functools import cmp_to_key
 
-LABEL			= ["person", "bike", "bus", "car"]
+LABEL			= ["person", "bike", "bus", "car", "tractor"]
 
 IGNORE_FOLDER 	= re.compile('\..')
 
 IMAGE_FOLDER  	= '/images/*'
 LABEL_FILE	  	= '/results.txt'
+OUTPUT_FILE		= '/output/vid_label.txt'
 
 IMG_NET_SIZE 	= 299
 
@@ -25,6 +26,7 @@ DUMMY_LABEL 	= torch.tensor([-1, -1, -1, -1, -1, -1, -1, -1])
 DUMMY_IMG_W 	= [-1 for _ in range(IMG_NET_SIZE)]
 DUMMY_IMG_WH	= [DUMMY_IMG_W for _ in range(IMG_NET_SIZE)]
 DUMMY_IMG 		= torch.tensor([DUMMY_IMG_WH for _ in range(3)])
+DUMMY_OUTPUT	= torch.tensor([0])
 
 def dataset_folder_open(folder_name):
 
@@ -32,7 +34,8 @@ def dataset_folder_open(folder_name):
 	dataset_list = os.listdir(path)
 	dataset = []
 
-	for data in dataset_list:
+	for data in tqdm(dataset_list, desc='Dataset loading'):
+
 		if IGNORE_FOLDER.match(data):
 			continue
 
@@ -69,7 +72,7 @@ def dataset_folder_open(folder_name):
 		for label in label_list:
 			if len(label) > largest_batch:
 				largest_batch = len(label)
-
+ 
 		# < Stacking >
 		for i, label in enumerate(label_list):
 
@@ -130,7 +133,37 @@ def dataset_folder_open(folder_name):
 
 			image_list[i] = torch.stack(sorted_img, dim=0)
 
-		dataset.append( (image_list, label_list, largest_batch) )
+		output = []
+		output_list = torch.tensor([DUMMY_OUTPUT for _ in range(largest_batch)])
+		output_list = torch.stack([ output_list for _ in range(frame_num) ])
+
+		with open(path+data+OUTPUT_FILE, 'r') as output_f:
+			while True:
+				line = output_f.readline()
+				if not line: break
+
+				line = [ int(x) for x in line.split(' ')[:-1] ]
+				output.append(line)
+
+		for i in range(frame_num):
+			
+			# Frame Check
+			for out in output:
+				if out[2] <= i <= out[3]:
+
+					# Check if objects are the same
+					for j, elem in enumerate(label_list[i]):	
+						if (int(elem[1]) is out[0]) and (int(elem[6]) is out[1]):
+							output_list[i][j] = tensor([1])		# Set object label to accident occurred
+
+			# output_list[i] = torch.stack(output_list[i], dim=0)
+
+		image_list = torch.stack(image_list, dim=0)
+		label_list = torch.stack(label_list, dim=0)
+
+		dataset.append( (frame_num, image_list, label_list, output_list, largest_batch) )
+
+	print("dataset load done.")
 
 	return dataset
 

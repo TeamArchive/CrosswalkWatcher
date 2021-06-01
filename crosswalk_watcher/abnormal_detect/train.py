@@ -38,17 +38,23 @@ datas = []
 
 def train(
 	model, 
-	train_data, train_label,
-	val_data, val_label,
-	mini_batch, 
+	train_data_list, val_data_list, 
 	criterion_func, optim, clip=5
 ):
 	global device
 
-	train_dataloader, _, _ = loader.load_dataset(1, train_data, train_label)
-	val_dataloader, _, _ = loader.load_dataset(1, val_data, val_label)
+	# [num video][0~3][datas]
+	# second : 1~3 : 
+	#	0. image data, 1. yolo label data, 2. output lable, 3. batch size
 
-	model.train()
+	train_idx 	= [ x for x in range(len(train_data_list)) ]
+	val_idx		= [ x for x in range(len(val_data_list)) ]
+
+	train_idx_ft = torch.tensor(train_idx);
+	val_idx_ft = torch.tensor(val_idx);
+
+	train_dataloader, _, _ = loader.load_dataset(1, train_idx_ft, train_idx_ft)
+	val_dataloader, _, _ = loader.load_dataset(1, val_idx_ft, val_idx_ft)
 
 	'''
 	---------------------------------------------------------------------------
@@ -56,22 +62,22 @@ def train(
 	---------------------------------------------------------------------------
 	'''
 
-	hidden = model.init_hidden(mini_batch)
+	model.train()
 	
-	losses = []
-	running_loss = 0.0
+	train_losses = []
 
 	pbar = enumerate(train_dataloader)
-	for i, (videos, labels) in pbar:
+	for i, (vid_idx, _) in pbar:
+		iter_dataset = train_data_list[vid_idx]
 
-		# videos, labels = videos.to(device), labels.to(device)
-		vid_num = int(videos[0][0])
+		mini_batch = iter_dataset[-1]
+		hidden = model.init_hidden(mini_batch)
 
-		vid_pbar = enumerate(range(datas[vid_num]['n_frame']))
+		vid_pbar = enumerate(range(iter_dataset[0]))
 
-		vid_img  = datas[vid_num]['images']
-		vid_lbs  = datas[vid_num]['yolo_lbs'].float()
-		lbs 	 = datas[vid_num]['labels'].float()
+		vid_img  = iter_dataset[1].float().to(device)
+		vid_lbs  = iter_dataset[2].float().to(device)
+		lbs 	 = iter_dataset[3].float().to(device)
 
 		for i, frame in vid_pbar:
 			print("frame : ", frame)
@@ -88,7 +94,7 @@ def train(
 			model.zero_grad()
 			output, hidden = model((img_into_model, lbs_into_model), hidden)
 			
-			# print("result : ", output.clone().detach().half())
+			print("result : ", output.clone().detach().half())
 
 			loss = criterion_func(output, model_label)
 
@@ -100,29 +106,30 @@ def train(
 			nn.utils.clip_grad_norm_(model.parameters(), clip)
 			optim.step()
 
-			print("running_loss : ", loss.item())
+			train_losses.append( loss.item() )
 
 	'''
 	---------------------------------------------------------------------------
 	< Validation part >
 	---------------------------------------------------------------------------
 	'''
-
-	hidden = model.init_hidden(mini_batch)
-	val_losses = []
 	
 	model.eval()
+	
+	val_losses = []
 		
 	pbar = enumerate(train_dataloader)
-	for i, (videos, labels) in pbar:
+	for i, (vid_idx, _) in pbar:
+		iter_dataset = train_data_list[vid_idx]
 
-		vid_num = int(videos[0][0])
+		mini_batch = iter_dataset[-1]
+		hidden = model.init_hidden(mini_batch)
 
-		vid_pbar = enumerate(range(datas[vid_num]['n_frame']))
+		vid_pbar = enumerate(range(iter_dataset[0]))
 
-		vid_img  = datas[vid_num]['images']
-		vid_lbs  = datas[vid_num]['yolo_lbs'].float()
-		lbs 	 = datas[vid_num]['labels'].float()
+		vid_img  = iter_dataset[1].float().to(device)
+		vid_lbs  = iter_dataset[2].float().to(device)
+		lbs 	 = iter_dataset[3].float().to(device)
 
 		for i, frame in vid_pbar:
 			hidden = tuple([e.data for e in hidden])
@@ -140,13 +147,12 @@ def train(
 			loss = criterion_func(output, model_label)
 			loss.item()
 			val_losses.append(loss.item())
-			print(loss.item())
-
-	model.train()
 
 	'''
 	---------------------------------------------------------------------------
 	'''
+
+	return train_losses, val_losses
 
 def iter_train(
 	model, epochs, batch_size, dataset, optim,
@@ -155,6 +161,8 @@ def iter_train(
 	criterion_func = nn.MSELoss(),
 ):
 	global device
+
+	valid_loss_min = np.Inf
 	
 	start_t = time.time()
 
@@ -182,34 +190,20 @@ def iter_train(
 		train_dataset.extend(dataset[val_end:])
 		val_dataset = dataset[val_start:val_end]
 
-		print(len(train_dataset[:][0]))
+		train_losses, val_losses = train(
+			model, 
+			train_dataset, val_dataset, 
+			criterion_func, optimizer
+		)
 
-		# train(
-		# 	model, 
-		# 	train_dataset[:][0], train_dataset[:][1], 
-		# 	val_dataset[:][0], val_dataset[:][1], 
-		# 	criterion_func, optimizer
-		# )
+		print("Epoch: {}/{}...".format(i+1, epochs),
+				"Loss: {:.6f}...".format(np.mean(val_losses)),
+				"Val Loss: {:.6f}".format(np.mean(val_losses)))
 
-# 	counter = 0
-# 	criterion = critical_func()
-# 	optimizer = optim_func(model.parameters(), lr=learning_rate)
-
-# 	model.to(device)
-# 	model.train()
-
-# 	for i in range(0, epochs):
-# 		train(model, train_loader, val_loader, batch_size, criterion_func, optimizer)
-	
-# 		# print("Epoch: {}/{}...".format(i+1, epochs),
-# 		# 		"Step: {}...".format(counter),
-# 		# 		"Loss: {:.6f}...".format(loss.item()),
-# 		# 		"Val Loss: {:.6f}".format(np.mean(val_losses)))
-
-# 		# if np.mean(val_losses) <= valid_loss_min:
-# 		# 	torch.save(model.state_dict(), './state_dict.pt')
-# 		# 	print('Validation loss decreased ({:.6f} --> {:.6f}).  Saving model ...'.format(valid_loss_min,np.mean(val_losses)))
-# 		# 	valid_loss_min = np.mean(val_losses)
+		if np.mean(val_losses) <= valid_loss_min:
+			torch.save(model.state_dict(), './state_dict.pt')
+			print('Validation loss decreased ({:.6f} --> {:.6f}).  Saving model ...'.format(valid_loss_min,np.mean(val_losses)))
+			valid_loss_min = np.mean(val_losses)
 
 '''
 ---------------------------------------------------------------------------
@@ -220,17 +214,7 @@ test_label = [[0] for _ in range(7)]
 test_label = [test_label for _ in range(191)]
 test_label = torch.tensor(test_label)
 
-dataset = dl.dataset_folder_open("../../../../project/train_dataset/tracked/")
-
-# datas.append({
-# 	'n_frame'	: 191,
-# 	'images' 	: torch.stack(dataset[0][0], dim=0),
-# 	'yolo_lbs' 	: torch.stack(dataset[0][1], dim=0),
-# 	'labels' 	: test_label
-# })
-
-# video_tf = torch.tensor([0]).view([-1, 1])
-# label_tf = torch.tensor([0]).view([-1, 1])
+dataset = dl.dataset_folder_open("../../../../project/train_dataset/tracked_test/")
 
 # < Create Model >
 lstm_hidden_size = 128
@@ -243,15 +227,11 @@ model = model.AbnormalDetector(
 	max_obj_size=128
 )
 
-# for param_tensor in model.state_dict():
-#     print(param_tensor, "\t", model.state_dict()[param_tensor].size())
-
 # < Training >
 model.to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 torch.autograd.set_detect_anomaly(True)
-# train(model, video_tf, label_tf, video_tf, label_tf, 7, nn.MSELoss(), optimizer)
-iter_train(model, 250, 1, dataset,optimizer)
+iter_train(model, 250, 1, dataset, optimizer)
 '''
 ---------------------------------------------------------------------------
 '''
