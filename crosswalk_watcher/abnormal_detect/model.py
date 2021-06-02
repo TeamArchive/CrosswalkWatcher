@@ -10,7 +10,7 @@ import numpy as np
 from torch.nn.modules.linear import Linear
 from torch.nn.modules.rnn import LSTM
 
-from util import init_models as models
+from util.init_models import initialize_model
 
 """
 
@@ -66,9 +66,9 @@ class AbnormalDetector(nn.Module):
 
 		self.dropout 	 = nn.Dropout(drop_prob)
 
-		# < Image Input : Inception v3 >
-		self.image_net, self.image_input_size = models.initialize_model(
-			"inception", half_concat_size, feature_extract, use_pretrained=True)
+		# < Image Input : ImageNet >
+		self.image_net, self.image_input_size = initialize_model(
+			"vgg", half_concat_size, feature_extract, use_pretrained=True)
 
 		# < Label Inputs and MLP >
 		self.in_fc = nn.Sequential(
@@ -104,6 +104,7 @@ class AbnormalDetector(nn.Module):
 		image_result = self.image_net(images)
 		
 		# < Label input and label MLP >
+		print(labels.shape)
 		label_result = self.in_fc(labels)
 
 		# < Concatenate >

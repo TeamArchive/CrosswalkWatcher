@@ -19,7 +19,7 @@ IMAGE_FOLDER  	= '/images/*'
 LABEL_FILE	  	= '/results.txt'
 OUTPUT_FILE		= '/output/vid_label.txt'
 
-IMG_NET_SIZE 	= 299
+IMG_NET_SIZE 	= 224
 
 # < Dummy Datas >
 DUMMY_LABEL 	= torch.tensor([-1, -1, -1, -1, -1, -1, -1, -1])

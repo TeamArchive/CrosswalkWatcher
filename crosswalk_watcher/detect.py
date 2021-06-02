@@ -2,12 +2,18 @@ import sys
 sys.path.insert(0, '../external/yolo_v5_deepsort/yolov5')
 sys.path.insert(0, '../external/yolo_v5_deepsort')
 
+sys.path.insert(0, './abnormal_detect')
+# sys.path.insert(0, './abnormal/util')
+
 from yolov5.utils.datasets import LoadImages, LoadStreams
 from yolov5.utils.general import check_img_size, non_max_suppression, scale_coords
 from yolov5.utils.torch_utils import select_device, time_synchronized
 
 from deep_sort_pytorch.utils.parser import get_config
 from deep_sort_pytorch.deep_sort import DeepSort
+
+from abnormal_detect.model import AbnormalDetector
+from abnormal_detect.util.init_models import initialize_model
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -25,6 +31,15 @@ import time
 
 SERVER_URL 		 = "http://localhost:3000/"
 ABNORMAL_EPSILON = 0.7
+MAX_OBJECT       = 128
+
+IMG_NET_SIZE = 224
+
+DUMMY_LABEL 	= torch.tensor([-1, -1, -1, -1, -1, -1, -1, -1]).float()
+DUMMY_IMG_W 	= [-1 for _ in range(IMG_NET_SIZE)]
+DUMMY_IMG_WH	= [DUMMY_IMG_W for _ in range(IMG_NET_SIZE)]
+DUMMY_IMG 		= torch.tensor([DUMMY_IMG_WH for _ in range(3)])
+DUMMY_OUTPUT	= torch.tensor([0])
 
 img_save_path = ""
 is_save_cropped = False
@@ -64,7 +79,7 @@ def compute_color_for_labels(label):
 
 font_size = None
 def draw_boxes(frame, img, bbox, wh, identities=None, offset=(0, 0), yolo_label=None):
-    no_colored = None
+    copy_img = img.copy()
     stacked_img = []
 
     for i, box in enumerate(bbox):
@@ -74,7 +89,7 @@ def draw_boxes(frame, img, bbox, wh, identities=None, offset=(0, 0), yolo_label=
         y1 += offset[1]
         y2 += offset[1]
         
-        cropped_img = img[y1:y2, x1:x2]
+        cropped_img = copy_img[y1:y2, x1:x2]
         if(cropped_img.shape[0] == 0 or cropped_img.shape[1] == 0): # wrong coord
             continue
 
@@ -84,17 +99,15 @@ def draw_boxes(frame, img, bbox, wh, identities=None, offset=(0, 0), yolo_label=
         color = compute_color_for_labels(id)
         label = '{} {:d}'.format(name, id)
 
+        cropped_img = cv2.resize(cropped_img, dsize=(IMG_NET_SIZE, IMG_NET_SIZE), interpolation=cv2.INTER_LINEAR)
         if is_save_cropped:
             cv2.imwrite(
                 img_save_path+"/images/f"+str(frame)+"_id"+str(id)+"_label_is_"+str(name)+".jpg", 
                 cropped_img
             )
+        cropped_img = np.rollaxis(cropped_img, 2, 0)
 
-        no_colored = torch.Tensor( 
-            cv2.resize(cropped_img, dsize=wh, interpolation=cv2.INTER_CUBIC)
-        )
-
-        stacked_img.append(torch.tensor(no_colored))
+        stacked_img.append(torch.tensor(cropped_img))
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
         
         if font_size is not None:
@@ -130,8 +143,8 @@ def detect(opt, save_img=False):
     font_size = opt.font_size
 
     # get options var
-    out, source, weights, view_img, save_txt, imgsz = \
-        opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
+    out, source, yolo_weights, abnormal_weight, view_img, save_txt, imgsz = \
+        opt.output, opt.source, opt.yolo_weights, opt.abnormal_weight, opt.view_img, opt.save_txt, opt.img_size
 
     webcam = source == '0' or source.startswith(
         'rtsp') or source.startswith('http') or source.endswith('.txt')
@@ -171,11 +184,22 @@ def detect(opt, save_img=False):
     half = device.type != 'cpu'  # half precision only supported on CUDA
 
     # Load model
-    model = torch.load(weights, map_location=device)[
+    print ("Load Yolo Model And Weight ... ", end='')
+    yolo_model = torch.load(yolo_weights, map_location=device)[
         'model'].float()  # load to FP32
-    model.to(device).eval()
+    yolo_model.to(device).eval()
     if half:
-        model.half()  # to FP16
+        yolo_model.half()  # to FP16
+    print ("Done.")
+
+    print ("Load Abnormal Detection Model And Weight ... ", end='')
+    lstm_hidden_size = 128
+    abnormal_model = AbnormalDetector( device, 8, 1, 128, 5, 4, max_obj_size=128 )
+    abnormal_model.load_state_dict(torch.load(abnormal_weight, map_location=device))
+    abnormal_model.to(device).eval()
+
+    abnormal_h = abnormal_model.init_hidden(MAX_OBJECT)
+    print("Done.")
 
     # Set Dataloader
     vid_path, vid_writer = None, None
@@ -189,13 +213,13 @@ def detect(opt, save_img=False):
         dataset = LoadImages(source, img_size=imgsz)
 
     # Get names and colors
-    names = model.module.names if hasattr(model, 'module') else model.names
+    names = yolo_model.module.names if hasattr(yolo_model, 'module') else yolo_model.names
 
     # Run inference
     t0 = time.time()
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
     # run once
-    _ = model(img.half() if half else img) if device.type != 'cpu' else None
+    _ = yolo_model(img.half() if half else img) if device.type != 'cpu' else None
 
     save_path = str(Path(out))
     txt_path = str(Path(out)) + '/results.txt'
@@ -212,12 +236,11 @@ def detect(opt, save_img=False):
 
         # Inference
         t1 = time_synchronized()
-        pred = model(img, augment=opt.augment)[0]
+        pred = yolo_model(img, augment=opt.augment)[0]
 
         # Apply NMS
         pred = non_max_suppression(
             pred, opt.conf_thres, opt.iou_thres, classes=classes, agnostic=opt.agnostic_nms)
-        t2 = time_synchronized()
 
         # Process detections
         labels = []
@@ -233,6 +256,7 @@ def detect(opt, save_img=False):
             save_path = str(Path(out) / Path(p).name)
 
             idx = 0
+            t2 = 0
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(
@@ -291,19 +315,38 @@ def detect(opt, save_img=False):
                                 f.write(('%g ' * 10 + '\n') % (frame_idx, identity, bbox_left,
                                                             bbox_top, bbox_w, bbox_h, idx, -1, -1, -1))  # label format
 
-                    outputs = [ np.concatenate((x, (idx, -1)), axis=None) for x in outputs]
-                    labels.extend(outputs)
+                            label = torch.tensor((frame_idx, identity, bbox_left, bbox_top, bbox_w, bbox_h, idx, -1)).float()
+                            labels.append(label)
 
-                if crop_imgs:
-                    crop_imgs = torch.stack(crop_imgs, dim=0)
+                if crop_imgs and labels:
+                    if len(labels) < MAX_OBJECT:
+                        n_dummy = MAX_OBJECT - len(labels)
+                        labels.extend([DUMMY_LABEL for _ in range(n_dummy)])
+
+                    if len(crop_imgs) < MAX_OBJECT:
+                        n_dummy = MAX_OBJECT - len(crop_imgs)
+                        crop_imgs.extend([DUMMY_IMG for _ in range(n_dummy)])
+
+                    crop_imgs = torch.stack(crop_imgs, dim=0).to(device)
+                    labels = torch.stack(labels, dim = 0).to(device)
+
+                    print()
+                    print("image tensor size", crop_imgs.shape)
+                    print("label tensor size", labels.shape)
+                    # print(labels)
 
                     # TODO : abnormal detection (image input : crop_img, label input : labels)
-                    result = None 
+                    # result = None 
+
+                    result, abnormal_h = abnormal_model((crop_imgs, labels), abnormal_h)
+                    print(result, t2)
 
                     # abnormal situation detected
-                    if result <= ABNORMAL_EPSILON:
-                        # TODO : put cctv infomation in upload_data arguments 
-                        pass
+                    # if result <= ABNORMAL_EPSILON:
+                    #     # TODO : put cctv infomation in upload_data arguments 
+                    #     pass
+
+                t2 = time_synchronized()
 
             else:
                 deepsort[idx].increment_ages()
@@ -341,11 +384,12 @@ def detect(opt, save_img=False):
 
     print('Done. (%.3fs)' % (time.time() - t0))
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str,
-                        default='checkpoint/yolov5s.pt', help='model.pt path')
+    parser.add_argument('--yolo-weights', type=str,
+                        default='checkpoint/yolov5s.pt', help='yolo_model.pt path')
+    parser.add_argument('--abnormal-weight', type=str,
+                        default='checkpoint/abnormal.pt', help='abnormal_detection_model.pt path')
     # file/folder, 0 for webcam
     parser.add_argument('--source', type=str,
                         default='inference/images', help='source')
@@ -381,6 +425,8 @@ if __name__ == '__main__':
                         help="save detected object's cropped images")
 
     args = parser.parse_args()
+    args.img_size = check_img_size(args.img_size)
+    print(args)
 
     with torch.no_grad():
         detect(args)
