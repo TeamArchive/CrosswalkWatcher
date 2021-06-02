@@ -73,14 +73,13 @@ def train(
 		mini_batch = iter_dataset[-1]
 		hidden = model.init_hidden(mini_batch)
 
-		vid_pbar = enumerate(range(iter_dataset[0]))
+		# vid_pbar = enumerate()
 
 		vid_img  = iter_dataset[1].float().to(device)
 		vid_lbs  = iter_dataset[2].float().to(device)
 		lbs 	 = iter_dataset[3].float().to(device)
 
-		for i, frame in vid_pbar:
-			print("frame : ", frame)
+		for frame in tqdm(range(iter_dataset[0]), desc='train progress ', unit=" frame"):
 			hidden = tuple([e.data for e in hidden])
 
 			img_into_model, lbs_into_model, model_label = (
@@ -93,8 +92,6 @@ def train(
 
 			model.zero_grad()
 			output, hidden = model((img_into_model, lbs_into_model), hidden)
-			
-			print("result : ", output.clone().detach().half())
 
 			loss = criterion_func(output, model_label)
 
@@ -125,13 +122,11 @@ def train(
 		mini_batch = iter_dataset[-1]
 		hidden = model.init_hidden(mini_batch)
 
-		vid_pbar = enumerate(range(iter_dataset[0]))
-
 		vid_img  = iter_dataset[1].float().to(device)
 		vid_lbs  = iter_dataset[2].float().to(device)
 		lbs 	 = iter_dataset[3].float().to(device)
 
-		for i, frame in vid_pbar:
+		for i, frame in tqdm(range(iter_dataset[0]),  desc='valication progress ', unit=" frame"):
 			hidden = tuple([e.data for e in hidden])
 
 			img_into_model, lbs_into_model, model_label = (

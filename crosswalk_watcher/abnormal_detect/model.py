@@ -68,7 +68,8 @@ class AbnormalDetector(nn.Module):
 
 		# < Image Input : ImageNet >
 		self.image_net, self.image_input_size = initialize_model(
-			"vgg", half_concat_size, feature_extract, use_pretrained=True)
+			"squeezenet", half_concat_size, feature_extract, use_pretrained=True)
+		self.image_net.to(device)
 
 		# < Label Inputs and MLP >
 		self.in_fc = nn.Sequential(
@@ -99,20 +100,17 @@ class AbnormalDetector(nn.Module):
 	def forward(self, x, hidden):
 
 		images = x[0]; labels = x[1]
-		
+
 		# < Image inputs >
+		if not self.training:
+			self.image_net.eval()
+
 		image_result = self.image_net(images)
-		
+
 		# < Label input and label MLP >
-		print(labels.shape)
 		label_result = self.in_fc(labels)
 
-		# < Concatenate >
-		
-		if self.training:
-			stacked_result = torch.cat([image_result.logits, label_result], dim=1)
-		else:
-			stacked_result = torch.cat([image_result, label_result], dim=1)
+		stacked_result = torch.cat([image_result, label_result], dim=1)
 
 		stacked_result = torch.unsqueeze(stacked_result, 0)
 

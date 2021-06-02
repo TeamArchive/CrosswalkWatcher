@@ -34,7 +34,7 @@ def dataset_folder_open(folder_name):
 	dataset_list = os.listdir(path)
 	dataset = []
 
-	for data in tqdm(dataset_list, desc='Dataset loading'):
+	for data in tqdm(dataset_list, desc='Dataset loading', unit=" video"):
 
 		if IGNORE_FOLDER.match(data):
 			continue

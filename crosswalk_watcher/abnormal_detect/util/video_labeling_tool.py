@@ -25,7 +25,7 @@ LABEL_FONT_THICK = 3
 
 YOLO_NAME = ['person', 'bike', 'bus', 'car', 'other']
 
-video_name = "a1"
+video_name = "a20"
 project_path = "../../../../../project/train_dataset/videos/"
 
 video_f = project_path+video_name+".mp4"

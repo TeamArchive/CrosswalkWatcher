@@ -193,7 +193,6 @@ def detect(opt, save_img=False):
     print ("Done.")
 
     print ("Load Abnormal Detection Model And Weight ... ", end='')
-    lstm_hidden_size = 128
     abnormal_model = AbnormalDetector( device, 8, 1, 128, 5, 4, max_obj_size=128 )
     abnormal_model.load_state_dict(torch.load(abnormal_weight, map_location=device))
     abnormal_model.to(device).eval()
@@ -315,7 +314,7 @@ def detect(opt, save_img=False):
                                 f.write(('%g ' * 10 + '\n') % (frame_idx, identity, bbox_left,
                                                             bbox_top, bbox_w, bbox_h, idx, -1, -1, -1))  # label format
 
-                            label = torch.tensor((frame_idx, identity, bbox_left, bbox_top, bbox_w, bbox_h, idx, -1)).float()
+                            label = torch.tensor((frame_idx, identity, bbox_left, bbox_top, bbox_w, bbox_h, idx, -1))
                             labels.append(label)
 
                 if crop_imgs and labels:
@@ -327,24 +326,27 @@ def detect(opt, save_img=False):
                         n_dummy = MAX_OBJECT - len(crop_imgs)
                         crop_imgs.extend([DUMMY_IMG for _ in range(n_dummy)])
 
-                    crop_imgs = torch.stack(crop_imgs, dim=0).to(device)
-                    labels = torch.stack(labels, dim = 0).to(device)
+                    crop_imgs = torch.stack(crop_imgs, dim=0).float()
+                    labels = torch.stack(labels, dim = 0).float()
 
-                    print()
-                    print("image tensor size", crop_imgs.shape)
-                    print("label tensor size", labels.shape)
-                    # print(labels)
-
-                    # TODO : abnormal detection (image input : crop_img, label input : labels)
-                    # result = None 
+                    crop_imgs.to(device); labels.to(device)
 
                     result, abnormal_h = abnormal_model((crop_imgs, labels), abnormal_h)
-                    print(result, t2)
+                    # print(result, t2)
+
+                    print()
+                    max_result = 0.0
+                    for r in result:
+                        print(float(r[0]), " - ", end='')
+                        if float(r[0]) > max_result:
+                            max_result = float(r[0])
+                    print()
+                    print("Max Reuslt : ", max_result)
+                    print()
 
                     # abnormal situation detected
-                    # if result <= ABNORMAL_EPSILON:
-                    #     # TODO : put cctv infomation in upload_data arguments 
-                    #     pass
+                    if max_result >= ABNORMAL_EPSILON:
+                        print("accident!!!!!!!")
 
                 t2 = time_synchronized()
 
@@ -371,8 +373,6 @@ def detect(opt, save_img=False):
                             vid_writer.release()  # release previous video writer
 
                         fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                        # w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        # h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                         vid_writer = cv2.VideoWriter(
                             save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (vid_w, vid_h))
                     vid_writer.write(im0)
