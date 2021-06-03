@@ -1,3 +1,4 @@
+import os
 from logging import critical
 
 import torch
@@ -37,8 +38,8 @@ CROSS_VAL_RATE = (9, 1)
 datas = []
 
 def train(
-	model, 
-	train_data_list, val_data_list, 
+	model, data_path,
+	train_idx, val_idx, 
 	criterion_func, optim, clip=5
 ):
 	global device
@@ -47,14 +48,12 @@ def train(
 	# second : 1~3 : 
 	#	0. image data, 1. yolo label data, 2. output lable, 3. batch size
 
-	train_idx 	= [ x for x in range(len(train_data_list)) ]
-	val_idx		= [ x for x in range(len(val_data_list)) ]
 
-	train_idx_ft = torch.tensor(train_idx);
-	val_idx_ft = torch.tensor(val_idx);
+	train_idx_ft	= torch.tensor([ x for x in range(len(train_idx)) ]);
+	val_idx_ft		= torch.tensor([ x for x in range(len(val_idx)) ]);
 
-	train_dataloader, _, _ = loader.load_dataset(1, train_idx_ft, train_idx_ft)
-	val_dataloader, _, _ = loader.load_dataset(1, val_idx_ft, val_idx_ft)
+	train_dataloader, _, _ 	= loader.load_dataset(1, train_idx_ft, train_idx_ft)
+	val_dataloader, _, _ 	= loader.load_dataset(1, val_idx_ft, val_idx_ft)
 
 	'''
 	---------------------------------------------------------------------------
@@ -62,24 +61,26 @@ def train(
 	---------------------------------------------------------------------------
 	'''
 
+	print()
+	print(" Train ")
+	print("--------------------------------------------------")
+
 	model.train()
-	
 	train_losses = []
 
 	pbar = enumerate(train_dataloader)
 	for i, (vid_idx, _) in pbar:
-		iter_dataset = train_data_list[vid_idx]
 
-		mini_batch = iter_dataset[-1]
+		print(train_idx[vid_idx], " data loding ... ", end='')
+		n_frame, vid_img, vid_lbs, lbs, mini_batch = dl.dataset_folder_open(data_path, train_idx[vid_idx])
+
+		vid_img  = vid_img.float().to(device)
+		vid_lbs  = vid_lbs.float().to(device)
+		lbs 	 = lbs.float().to(device)
+
 		hidden = model.init_hidden(mini_batch)
 
-		# vid_pbar = enumerate()
-
-		vid_img  = iter_dataset[1].float().to(device)
-		vid_lbs  = iter_dataset[2].float().to(device)
-		lbs 	 = iter_dataset[3].float().to(device)
-
-		for frame in tqdm(range(iter_dataset[0]), desc='train progress ', unit=" frame"):
+		for frame in tqdm(range(n_frame), desc='train progress ', unit=" frame"):
 			hidden = tuple([e.data for e in hidden])
 
 			img_into_model, lbs_into_model, model_label = (
@@ -105,28 +106,33 @@ def train(
 
 			train_losses.append( loss.item() )
 
+		del vid_img; del vid_lbs; del lbs; del mini_batch;
+
 	'''
 	---------------------------------------------------------------------------
 	< Validation part >
 	---------------------------------------------------------------------------
 	'''
 	
+	print()
+	print(" Valication ")
+	print("--------------------------------------------------")
+
 	model.eval()
-	
 	val_losses = []
-		
+
 	pbar = enumerate(train_dataloader)
 	for i, (vid_idx, _) in pbar:
-		iter_dataset = train_data_list[vid_idx]
+		print(train_idx[vid_idx], " data loding ... ", end='')
+		n_frame, vid_img, vid_lbs, lbs, mini_batch = dl.dataset_folder_open(data_path, train_idx[vid_idx])
 
-		mini_batch = iter_dataset[-1]
+		vid_img  = vid_img.float().to(device)
+		vid_lbs  = vid_lbs.float().to(device)
+		lbs 	 = lbs.float().to(device)
+
 		hidden = model.init_hidden(mini_batch)
 
-		vid_img  = iter_dataset[1].float().to(device)
-		vid_lbs  = iter_dataset[2].float().to(device)
-		lbs 	 = iter_dataset[3].float().to(device)
-
-		for i, frame in tqdm(range(iter_dataset[0]),  desc='valication progress ', unit=" frame"):
+		for i, frame in tqdm(range(n_frame),  desc='valication progress ', unit=" frame"):
 			hidden = tuple([e.data for e in hidden])
 
 			img_into_model, lbs_into_model, model_label = (
@@ -143,6 +149,8 @@ def train(
 			loss.item()
 			val_losses.append(loss.item())
 
+		del vid_img; del vid_lbs; del lbs; del mini_batch;
+
 	'''
 	---------------------------------------------------------------------------
 	'''
@@ -150,7 +158,7 @@ def train(
 	return train_losses, val_losses
 
 def iter_train(
-	model, epochs, batch_size, dataset, optim,
+	model, epochs, batch_size, data_path, optim,
 	max_grad_norm = MAX_GRAD_NORM,
 	learning_rate = LEARNING_RATE,
 	criterion_func = nn.MSELoss(),
@@ -162,7 +170,8 @@ def iter_train(
 	start_t = time.time()
 
 	# Cross Validation : Calculate Rate
-	n_data = len(dataset)
+	dataset_list = os.listdir(data_path)
+	n_data = len(dataset_list)
 
 	data_rate = 0
 	for rate in CROSS_VAL_RATE:
@@ -181,13 +190,14 @@ def iter_train(
 		val_start	= val_range * val_fold
 		val_end		= val_start + val_range
 
-		train_dataset = dataset[0:val_start]
-		train_dataset.extend(dataset[val_end:])
-		val_dataset = dataset[val_start:val_end]
+		train_idx = dataset_list[0:val_start]
+		train_idx.extend(dataset_list[val_end:])
+		val_idx = dataset_list[val_start:val_end]
 
 		train_losses, val_losses = train(
 			model, 
-			train_dataset, val_dataset, 
+			data_path,
+			train_idx, val_idx, 
 			criterion_func, optimizer
 		)
 
@@ -209,7 +219,9 @@ test_label = [[0] for _ in range(7)]
 test_label = [test_label for _ in range(191)]
 test_label = torch.tensor(test_label)
 
-dataset = dl.dataset_folder_open("../../../../project/train_dataset/tracked_test/")
+dataset_path = "../../../../project/train_dataset/tracked_test/"
+
+# dataset = dl.dataset_folder_open("../../../../project/train_dataset/tracked_test/")
 
 # < Create Model >
 lstm_hidden_size = 128
@@ -226,7 +238,7 @@ model = model.AbnormalDetector(
 model.to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 torch.autograd.set_detect_anomaly(True)
-iter_train(model, 250, 1, dataset, optimizer)
+iter_train(model, 250, 1, dataset_path, optimizer)
 '''
 ---------------------------------------------------------------------------
 '''
