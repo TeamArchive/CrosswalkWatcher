@@ -31,18 +31,14 @@ import time
 
 SERVER_URL 		 = "http://localhost:3000/"
 ABNORMAL_EPSILON = 0.7
-MAX_OBJECT       = 128
+MAX_OBJECT       = 64
 
 IMG_NET_SIZE = 224
 
-DUMMY_LABEL 	= torch.tensor([-1, -1, -1, -1, -1, -1, -1, -1]).float()
-DUMMY_IMG_W 	= [-1 for _ in range(IMG_NET_SIZE)]
-DUMMY_IMG_WH	= [DUMMY_IMG_W for _ in range(IMG_NET_SIZE)]
-DUMMY_IMG 		= torch.tensor([DUMMY_IMG_WH for _ in range(3)])
-DUMMY_OUTPUT	= torch.tensor([0])
+DUMMY_LABEL 	= torch.tensor([-1, -1, -1, -1, -1, -1]).float()
+DUMMY_OUTPUT	= torch.tensor([0]).float()
 
 img_save_path = ""
-is_save_cropped = False
 
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
 
@@ -78,9 +74,7 @@ def compute_color_for_labels(label):
     return tuple(color)
 
 font_size = None
-def draw_boxes(frame, img, bbox, wh, identities=None, offset=(0, 0), yolo_label=None):
-    copy_img = img.copy()
-    stacked_img = []
+def draw_boxes(frame, img, bbox, identities=None, offset=(0, 0), yolo_label=None):
 
     for i, box in enumerate(bbox):
         x1, y1, x2, y2 = [int(i) for i in box]
@@ -88,10 +82,6 @@ def draw_boxes(frame, img, bbox, wh, identities=None, offset=(0, 0), yolo_label=
         x2 += offset[0]
         y1 += offset[1]
         y2 += offset[1]
-        
-        cropped_img = copy_img[y1:y2, x1:x2]
-        if(cropped_img.shape[0] == 0 or cropped_img.shape[1] == 0): # wrong coord
-            continue
 
         # box text and bar
         id = int(identities[i]) if identities is not None else 0
@@ -99,15 +89,6 @@ def draw_boxes(frame, img, bbox, wh, identities=None, offset=(0, 0), yolo_label=
         color = compute_color_for_labels(id)
         label = '{} {:d}'.format(name, id)
 
-        cropped_img = cv2.resize(cropped_img, dsize=(IMG_NET_SIZE, IMG_NET_SIZE), interpolation=cv2.INTER_LINEAR)
-        if is_save_cropped:
-            cv2.imwrite(
-                img_save_path+"/images/f"+str(frame)+"_id"+str(id)+"_label_is_"+str(name)+".jpg", 
-                cropped_img
-            )
-        cropped_img = np.rollaxis(cropped_img, 2, 0)
-
-        stacked_img.append(torch.tensor(cropped_img))
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
         
         if font_size is not None:
@@ -118,11 +99,10 @@ def draw_boxes(frame, img, bbox, wh, identities=None, offset=(0, 0), yolo_label=
             cv2.putText(
                 img, label, (x1, y1 + t_size[1] + 1), cv2.FONT_HERSHEY_PLAIN, font_size, [255, 255, 255], 1)
 
-    return img, stacked_img
+    return img
 
-def detect(opt, save_img=False):
+def detect(opt, save_img=True):
     global label_names
-    global is_save_cropped
     global font_size
     global img_save_path
 
@@ -138,7 +118,6 @@ def detect(opt, save_img=False):
     opt.img_size = check_img_size(opt.img_size)
 
     img_save_path = opt.output
-    is_save_cropped = opt.save_cropped_img
 
     font_size = opt.font_size
 
@@ -193,8 +172,16 @@ def detect(opt, save_img=False):
     print ("Done.")
 
     print ("Load Abnormal Detection Model And Weight ... ", end='')
-    abnormal_model = AbnormalDetector( device, 8, 1, 128, 5, 4, max_obj_size=128 )
-    abnormal_model.load_state_dict(torch.load(abnormal_weight, map_location=device))
+    lstm_hidden_size = 128
+    abnormal_model = AbnormalDetector(
+        device, 
+        6, 1, 				# label input, output size
+        lstm_hidden_size, 	# lstm hidden layer size
+        96, 					# label input hidden size
+        24, 					# concat_size size
+        max_obj_size=MAX_OBJECT
+    )
+    abnormal_model.load_state_dict( torch.load(abnormal_weight, map_location=device) )
     abnormal_model.to(device).eval()
 
     abnormal_h = abnormal_model.init_hidden(MAX_OBJECT)
@@ -242,8 +229,6 @@ def detect(opt, save_img=False):
             pred, opt.conf_thres, opt.iou_thres, classes=classes, agnostic=opt.agnostic_nms)
 
         # Process detections
-        labels = []
-        crop_imgs = []
         for i, det in enumerate(pred):  # detections per image
 
             if webcam:  # batch_size >= 1
@@ -297,10 +282,45 @@ def detect(opt, save_img=False):
                     if len(outputs) > 0:
                         bbox_xyxy = outputs[:, :4]
                         identities = outputs[:, -1]
-                        _, img_elems = draw_boxes(
-                            frame_idx, im0, bbox_xyxy, (vid_w, vid_h), identities, yolo_label=idx)
-                        
-                        crop_imgs.extend(img_elems)
+                        draw_boxes(frame_idx, im0, bbox_xyxy, identities, yolo_label=idx)
+
+                        labels = []
+                        for output in outputs:
+                            bbox_left = output[0]
+                            bbox_top = output[1]
+                            bbox_w = output[2]
+                            bbox_h = output[3]
+                            identity = output[-1]
+
+                            label = torch.tensor(
+                                (identity, bbox_left/vid_w, bbox_top/vid_h, bbox_w/vid_w, bbox_h/vid_h, idx)
+                            )
+                            labels.append(label)
+
+                        if len(labels) < MAX_OBJECT:
+                            n_dummy = MAX_OBJECT - len(labels)
+                            for _ in range(0, n_dummy):
+                                labels.append(DUMMY_LABEL)
+
+                        stacked_label = torch.stack(labels, dim = 0).float()
+                        abnormal_h  = tuple([e.data for e in abnormal_h])
+
+                        stacked_label   = stacked_label.to(device)
+                        img             = img.to(device)
+
+                        result, abnormal_h = abnormal_model((img, stacked_label), abnormal_h)
+
+                        max_result = 0.0
+                        for r in result:
+                            print(float(r[0]), " - ", end='')
+                            if float(r[0]) > max_result:
+                                max_result = float(r[0])
+
+                        print("Max Reusult : ", max_result)
+
+                        # abnormal situation detected
+                        if max_result >= ABNORMAL_EPSILON:
+                            print("accident!!!!!!!")
 
                     # Write MOT compliant results to file
                     if save_txt and len(outputs) != 0:
@@ -314,44 +334,11 @@ def detect(opt, save_img=False):
                                 f.write(('%g ' * 10 + '\n') % (frame_idx, identity, bbox_left,
                                                             bbox_top, bbox_w, bbox_h, idx, -1, -1, -1))  # label format
 
-                            label = torch.tensor((frame_idx, identity, bbox_left, bbox_top, bbox_w, bbox_h, idx, -1))
-                            labels.append(label)
-
-                if crop_imgs and labels:
-                    if len(labels) < MAX_OBJECT:
-                        n_dummy = MAX_OBJECT - len(labels)
-                        labels.extend([DUMMY_LABEL for _ in range(n_dummy)])
-
-                    if len(crop_imgs) < MAX_OBJECT:
-                        n_dummy = MAX_OBJECT - len(crop_imgs)
-                        crop_imgs.extend([DUMMY_IMG for _ in range(n_dummy)])
-
-                    crop_imgs = torch.stack(crop_imgs, dim=0).float()
-                    labels = torch.stack(labels, dim = 0).float()
-
-                    crop_imgs.to(device); labels.to(device)
-
-                    result, abnormal_h = abnormal_model((crop_imgs, labels), abnormal_h)
-                    # print(result, t2)
-
-                    print()
-                    max_result = 0.0
-                    for r in result:
-                        print(float(r[0]), " - ", end='')
-                        if float(r[0]) > max_result:
-                            max_result = float(r[0])
-                    print()
-                    print("Max Reuslt : ", max_result)
-                    print()
-
-                    # abnormal situation detected
-                    if max_result >= ABNORMAL_EPSILON:
-                        print("accident!!!!!!!")
-
-                t2 = time_synchronized()
 
             else:
                 deepsort[idx].increment_ages()
+
+            t2 = time_synchronized()
 
             # Print time (inference + NMS)
             print('%sDone. (%.3fs)' % (s, t2 - t1))
@@ -421,8 +408,6 @@ if __name__ == '__main__':
                         default="configs/data.yaml")
     parser.add_argument("--font-size", type=int,
                         default=None)
-    parser.add_argument("--save-cropped-img", action='store_true',
-                        help="save detected object's cropped images")
 
     args = parser.parse_args()
     args.img_size = check_img_size(args.img_size)

@@ -58,6 +58,8 @@ class AbnormalDetector(nn.Module):
 		
 		self.device = device
 
+		self.max_obj_size = max_obj_size
+
 		self.input_size 	  = input_size
 		self.lstm_hidden_size = lstm_hidden_size
 		self.n_layer 		  = n_layer
@@ -68,7 +70,7 @@ class AbnormalDetector(nn.Module):
 
 		# < Image Input : ImageNet >
 		self.image_net, self.image_input_size = initialize_model(
-			"squeezenet", half_concat_size, feature_extract, use_pretrained=True)
+			"squeezenet", half_concat_size, feature_extract, use_pretrained=False)
 		self.image_net.to(device)
 
 		# < Label Inputs and MLP >
@@ -104,14 +106,15 @@ class AbnormalDetector(nn.Module):
 		# < Image inputs >
 		if not self.training:
 			self.image_net.eval()
-
+		
 		image_result = self.image_net(images)
 
-		# < Label input and label MLP >
+		# < Label input >
 		label_result = self.in_fc(labels)
 
+		# < Concatenate >
+		image_result = image_result.repeat(self.max_obj_size, 1)
 		stacked_result = torch.cat([image_result, label_result], dim=1)
-
 		stacked_result = torch.unsqueeze(stacked_result, 0)
 
 		# < LSTM layer >

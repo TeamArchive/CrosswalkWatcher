@@ -1,4 +1,8 @@
 import os
+import sys
+sys.path.insert(0, '../../external/yolo_v5_deepsort/yolov5')
+sys.path.insert(0, '../../external/yolo_v5_deepsort')
+
 from logging import critical
 
 import torch
@@ -34,6 +38,8 @@ MAX_GRAD_NORM = 5
 LEARNING_RATE = 0.01
 
 CROSS_VAL_RATE = (9, 1)
+
+MAX_OBJ = 64
 
 datas = []
 
@@ -72,11 +78,10 @@ def train(
 	for i, (vid_idx, _) in pbar:
 
 		print(train_idx[vid_idx], " data loding ... ", end='')
-		n_frame, vid_img, vid_lbs, lbs, mini_batch = dl.dataset_folder_open(data_path, train_idx[vid_idx])
-
-		vid_img  = vid_img.float().to(device)
-		vid_lbs  = vid_lbs.float().to(device)
-		lbs 	 = lbs.float().to(device)
+		loaded_data = dl.dataset_folder_open(data_path, train_idx[vid_idx], MAX_OBJ)
+		if loaded_data == None: continue
+		
+		n_frame, vid_img, vid_lbs, lbs, mini_batch = loaded_data
 
 		hidden = model.init_hidden(mini_batch)
 
@@ -84,12 +89,14 @@ def train(
 			hidden = tuple([e.data for e in hidden])
 
 			img_into_model, lbs_into_model, model_label = (
-				vid_img[frame].clone().detach().requires_grad_(True), 
-				vid_lbs[frame].clone().detach().requires_grad_(True), 
-				lbs[frame].clone().clone().detach().requires_grad_(True), 
+				vid_img[frame].clone().detach().requires_grad_(True),
+				vid_lbs[frame].clone().detach().requires_grad_(True),
+				lbs[frame].clone().clone().detach().requires_grad_(True) 
 			)
 			
-			img_into_model.to(device); lbs_into_model.to(device); model_label.to(device)
+			img_into_model 	= img_into_model.to(device); 
+			lbs_into_model 	= lbs_into_model.to(device); 
+			model_label		= model_label.to(device)
 
 			model.zero_grad()
 			output, hidden = model((img_into_model, lbs_into_model), hidden)
@@ -121,27 +128,28 @@ def train(
 	model.eval()
 	val_losses = []
 
-	pbar = enumerate(train_dataloader)
+	pbar = enumerate(val_dataloader)
 	for i, (vid_idx, _) in pbar:
 		print(train_idx[vid_idx], " data loding ... ", end='')
-		n_frame, vid_img, vid_lbs, lbs, mini_batch = dl.dataset_folder_open(data_path, train_idx[vid_idx])
-
-		vid_img  = vid_img.float().to(device)
-		vid_lbs  = vid_lbs.float().to(device)
-		lbs 	 = lbs.float().to(device)
+		loaded_data = dl.dataset_folder_open(data_path, train_idx[vid_idx], MAX_OBJ)
+		if loaded_data == None: continue
+		
+		n_frame, vid_img, vid_lbs, lbs, mini_batch = loaded_data
 
 		hidden = model.init_hidden(mini_batch)
 
-		for i, frame in tqdm(range(n_frame),  desc='valication progress ', unit=" frame"):
+		for frame in tqdm(range(n_frame), desc='valication progress ', unit=" frame"):
 			hidden = tuple([e.data for e in hidden])
 
 			img_into_model, lbs_into_model, model_label = (
-				vid_img[frame].clone().detach().requires_grad_(True), 
-				vid_lbs[frame].clone().detach().requires_grad_(True), 
-				lbs[frame].clone().clone().detach().requires_grad_(True), 
+				vid_img[frame].clone().detach().requires_grad_(True),
+				vid_lbs[frame].clone().detach().requires_grad_(True),
+				lbs[frame].clone().clone().detach().requires_grad_(True) 
 			)
 			
-			img_into_model.to(device); lbs_into_model.to(device); model_label.to(device)
+			img_into_model 	= img_into_model.to(device); 
+			lbs_into_model 	= lbs_into_model.to(device); 
+			model_label		= model_label.to(device)
 
 			output, hidden = model((img_into_model, lbs_into_model), hidden)
 
@@ -219,7 +227,7 @@ test_label = [[0] for _ in range(7)]
 test_label = [test_label for _ in range(191)]
 test_label = torch.tensor(test_label)
 
-dataset_path = "../../../../project/train_dataset/tracked_test/"
+dataset_path = "../../../../project/train_dataset/tracked_tes/"
 
 # dataset = dl.dataset_folder_open("../../../../project/train_dataset/tracked_test/")
 
@@ -227,18 +235,18 @@ dataset_path = "../../../../project/train_dataset/tracked_test/"
 lstm_hidden_size = 128
 model = model.AbnormalDetector(
 	device, 
-	8, 1, 				# label input, output size
+	6, 1, 				# label input, output size
 	lstm_hidden_size, 	# lstm hidden layer size
-	5, 					# label input hidden size
-	4, 					# concat_size size
-	max_obj_size=128
+	96, 					# label input hidden size
+	24, 					# concat_size size
+	max_obj_size=MAX_OBJ
 )
 
 # < Training >
 model.to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 torch.autograd.set_detect_anomaly(True)
-iter_train(model, 250, 1, dataset_path, optimizer)
+iter_train(model, 100, 1, dataset_path, optimizer)
 '''
 ---------------------------------------------------------------------------
 '''
