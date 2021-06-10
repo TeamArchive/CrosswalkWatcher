@@ -165,19 +165,3 @@ def dataset_folder_open(path, data, max_obj):
 	print(" Done . ")
 
 	return result
-
-
-# path = "../../../../../project/train_dataset/tracked_tes/"
-# dataset_list = os.listdir(path)
-# dataset = []
-
-# for data in tqdm(dataset_list, desc='Dataset loading', unit=" video"):
-# 	print(data)
-# result = dataset_folder_open(path, 'a2', 128)
-
-# if result != None:
-# 	print("frame : ", result[0])
-# 	print("image : ", result[1].shape)
-# 	print("label : ", result[2].shape)
-# 	print(" out  : ", result[3].shape)
-# 	print("batch : ", result[4])

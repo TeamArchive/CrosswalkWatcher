@@ -64,7 +64,7 @@ class AbnormalDetector(nn.Module):
 		self.lstm_hidden_size = lstm_hidden_size
 		self.n_layer 		  = n_layer
 		self.concat_size	  = concat_size
-		half_concat_size	  = int(concat_size/2);
+		half_concat_size	  = concat_size-input_size;
 
 		self.dropout 	 = nn.Dropout(drop_prob)
 
@@ -72,12 +72,6 @@ class AbnormalDetector(nn.Module):
 		self.image_net, self.image_input_size = initialize_model(
 			"squeezenet", half_concat_size, feature_extract, use_pretrained=False)
 		self.image_net.to(device)
-
-		# < Label Inputs and MLP >
-		self.in_fc = nn.Sequential(
-			nn.Linear(input_size, label_hidden_size), 		nn.ReLU(), self.dropout,
-			nn.Linear(label_hidden_size, half_concat_size), nn.ReLU(),
-		)
 		
 		# < Video Input >
 		self.lstm =nn.LSTM(
@@ -109,21 +103,26 @@ class AbnormalDetector(nn.Module):
 		
 		image_result = self.image_net(images)
 
-		# < Label input >
-		label_result = self.in_fc(labels)
-
 		# < Concatenate >
 		image_result = image_result.repeat(self.max_obj_size, 1)
-		stacked_result = torch.cat([image_result, label_result], dim=1)
+		stacked_result = torch.cat([image_result, labels], dim=1)
 		stacked_result = torch.unsqueeze(stacked_result, 0)
+
+		# print(stacked_result.half())
 
 		# < LSTM layer >
 		lstm_result, hidden = self.lstm(stacked_result, hidden)
 		lstm_result = self.dropout(lstm_result)
+
+		# print(lstm_result.half())
 		lstm_result = lstm_result.squeeze()
+
+		# print(lstm_result.half())
 
 		# < FC Layer >
 		fc_result = self.out_fc(lstm_result)
+
+		print(fc_result.half())
 
 		# < Activation >
 		result = self.sigmoid(fc_result)

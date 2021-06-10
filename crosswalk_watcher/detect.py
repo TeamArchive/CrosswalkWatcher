@@ -21,6 +21,7 @@ import torch.backends.cudnn as cudnn
 import numpy as np
 from pathlib import Path
 import cv2
+from PIL import ImageFont, ImageDraw, Image
 import yaml
 
 import argparse
@@ -38,6 +39,10 @@ IMG_NET_SIZE = 224
 DUMMY_LABEL 	= torch.tensor([-1, -1, -1, -1, -1, -1]).float()
 DUMMY_OUTPUT	= torch.tensor([0]).float()
 
+RED_COLOR = (0, 0, 255)
+GREEN_COLOR = (0, 255, 0)
+WHITE_COLOR = (255, 255, 255)
+
 img_save_path = ""
 
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
@@ -45,12 +50,18 @@ palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
 label_names = []
 default_classes = []
 
-def upload_data(cctv_num, cctv_location, cctv_state, cctv_url):
+# < Set CCTV Infomation >
+CCTV_NUM        = 1
+CCTV_LOCATION   = 1   
+CCTV_STATE      = "warning"
+CCTV_URL        = "url"
+
+def upload_data():
 	command = (
 		'curl -L -v -d ' +
 		'\'{{ "cctv_number":"{0}","cctv_location":"{1}","cctv_state":"{2}","cctv_url":"{3}" }}\''+
 		' -H "Accept: application/json" -H "Content-Type: application/json" -X POST {4}'
-	).format(cctv_num, cctv_location, cctv_state, cctv_url, SERVER_URL)
+	).format(CCTV_NUM, CCTV_LOCATION, CCTV_STATE, CCTV_URL, SERVER_URL)
 
 	os.system(command)
 
@@ -101,6 +112,50 @@ def draw_boxes(frame, img, bbox, identities=None, offset=(0, 0), yolo_label=None
 
     return img
 
+GRAPH_UNIT = 100
+val_record = [] 
+def draw_indicator(frame, img, val, epsilon = 0.7):
+    global val_record
+    shape = img.shape
+
+    val_record.append(val)
+
+    # < Infomation >
+    font_scale = 1.0
+    text_back = np.array(Image.fromarray(np.zeros((200,shape[1],3),np.uint8)))
+    cv2.putText(text_back, str(frame), (10,50), cv2.FONT_HERSHEY_SIMPLEX, font_scale, WHITE_COLOR, 1, cv2.LINE_AA)
+
+    start = 0
+    if len(val_record) > GRAPH_UNIT:
+        start = len(val_record)-GRAPH_UNIT
+
+    pos = 0
+    start_h = 40
+
+    graph_w = int(shape[1] / GRAPH_UNIT)
+    graph_h = 125
+
+    text_back = cv2.line( text_back, 
+        (0, int(graph_h - epsilon*graph_h + start_h)), 
+        (shape[1], int(graph_h - epsilon*graph_h + start_h)), 
+        RED_COLOR, 4
+    )
+
+    for i in range(start, len(val_record)-1):
+        text_back = cv2.line( text_back, 
+            (pos*graph_w, graph_h - int(val_record[i] * graph_h) + start_h), 
+            ((pos+1)*graph_w, graph_h - int(val_record[i+1] * graph_h) + start_h), 
+            WHITE_COLOR, 4
+        )
+        pos += 1
+
+    # < Concatenate Image >
+    result = np.array(Image.fromarray(np.zeros((shape[0]+200,shape[1],3),np.uint8)))
+    result[:shape[0], :shape[1]] = img
+    result[shape[0]:shape[0]+200, :shape[1]] = text_back
+
+    return result
+
 def detect(opt, save_img=True):
     global label_names
     global font_size
@@ -133,6 +188,8 @@ def detect(opt, save_img=True):
     # initialize deepsort
     cfg = get_config()
     cfg.merge_from_file(opt.config_deepsort)
+
+    vid_output = []
 
     deepsort = []
     for i in range(len(classes)):
@@ -229,6 +286,7 @@ def detect(opt, save_img=True):
             pred, opt.conf_thres, opt.iou_thres, classes=classes, agnostic=opt.agnostic_nms)
 
         # Process detections
+        labels = []
         for i, det in enumerate(pred):  # detections per image
 
             if webcam:  # batch_size >= 1
@@ -284,7 +342,6 @@ def detect(opt, save_img=True):
                         identities = outputs[:, -1]
                         draw_boxes(frame_idx, im0, bbox_xyxy, identities, yolo_label=idx)
 
-                        labels = []
                         for output in outputs:
                             bbox_left = output[0]
                             bbox_top = output[1]
@@ -297,31 +354,6 @@ def detect(opt, save_img=True):
                             )
                             labels.append(label)
 
-                        if len(labels) < MAX_OBJECT:
-                            n_dummy = MAX_OBJECT - len(labels)
-                            for _ in range(0, n_dummy):
-                                labels.append(DUMMY_LABEL)
-
-                        stacked_label = torch.stack(labels, dim = 0).float()
-                        abnormal_h  = tuple([e.data for e in abnormal_h])
-
-                        stacked_label   = stacked_label.to(device)
-                        img             = img.to(device)
-
-                        result, abnormal_h = abnormal_model((img, stacked_label), abnormal_h)
-
-                        max_result = 0.0
-                        for r in result:
-                            print(float(r[0]), " - ", end='')
-                            if float(r[0]) > max_result:
-                                max_result = float(r[0])
-
-                        print("Max Reusult : ", max_result)
-
-                        # abnormal situation detected
-                        if max_result >= ABNORMAL_EPSILON:
-                            print("accident!!!!!!!")
-
                     # Write MOT compliant results to file
                     if save_txt and len(outputs) != 0:
                         for j, output in enumerate(outputs):
@@ -333,7 +365,38 @@ def detect(opt, save_img=True):
                             with open(txt_path, 'a') as f:
                                 f.write(('%g ' * 10 + '\n') % (frame_idx, identity, bbox_left,
                                                             bbox_top, bbox_w, bbox_h, idx, -1, -1, -1))  # label format
+                                                            
+                if len(labels) < MAX_OBJECT:
+                    n_dummy = MAX_OBJECT - len(labels)
+                    for _ in range(0, n_dummy):
+                        labels.append(DUMMY_LABEL)
 
+                stacked_label = torch.stack(labels, dim = 0).float()
+
+                if frame_idx % 10 == 0:
+                    print("reset!!!!!!!!")
+                    abnormal_h = abnormal_model.init_hidden(MAX_OBJECT)
+
+                abnormal_h  = tuple([e.data for e in abnormal_h])
+
+                stacked_label   = stacked_label.to(device)
+                img             = img.to(device)
+
+                result, abnormal_h = abnormal_model((img, stacked_label), abnormal_h)
+                labels = []
+
+                max_result = 0.0
+                for r in result:
+                    print(float(r[0]), " - ", end='')
+                    if float(r[0]) > max_result:
+                        max_result = float(r[0])
+                print(max_result)
+
+                # abnormal situation detected
+                if max_result >= ABNORMAL_EPSILON:
+                    upload_data()
+
+                im0 = draw_indicator(frame_idx, im0, max_result)
 
             else:
                 deepsort[idx].increment_ages()
@@ -361,7 +424,7 @@ def detect(opt, save_img=True):
 
                         fps = vid_cap.get(cv2.CAP_PROP_FPS)
                         vid_writer = cv2.VideoWriter(
-                            save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (vid_w, vid_h))
+                            save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (vid_w, vid_h+200))
                     vid_writer.write(im0)
 
     if save_txt or save_img:

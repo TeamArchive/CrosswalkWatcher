@@ -85,7 +85,7 @@ def train(
 
 		hidden = model.init_hidden(mini_batch)
 
-		for frame in tqdm(range(n_frame), desc='train progress ', unit=" frame"):
+		for frame in tqdm(range(n_frame-5), desc='train progress ', unit=" frame"):
 			hidden = tuple([e.data for e in hidden])
 
 			img_into_model, lbs_into_model, model_label = (
